@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import { useRouter } from 'next/navigation';
 
@@ -16,58 +16,133 @@ export default function Dashboard() {
     recommendedFats: 65
   });
 
-  const [caloriesRemaining, setCaloriesRemaining] = useState(1250);
+  // Get calculated nutrition data from onboarding
+  const [nutritionData, setNutritionData] = useState(null);
+  const [caloriesRemaining, setCaloriesRemaining] = useState(0);
   const [macros, setMacros] = useState({
-    protein: { 
-      remaining: 45, 
-      total: userData.recommendedProtein,
-      status: 'over' 
-    },
-    carbs: { 
-      remaining: 89, 
-      total: userData.recommendedCarbs,
-      status: 'left' 
-    },
-    fats: { 
-      remaining: 48, 
-      total: userData.recommendedFats,
-      status: 'left' 
-    }
+    protein: { remaining: 0, total: 0, status: 'left' },
+    carbs: { remaining: 0, total: 0, status: 'left' },
+    fats: { remaining: 0, total: 0, status: 'left' }
   });
+
+  useEffect(() => {
+    // In a real app, this would come from your state management or API
+    const storedData = localStorage.getItem('nutritionData');
+    if (storedData) {
+      const data = JSON.parse(storedData);
+      setNutritionData(data);
+      setCaloriesRemaining(data.calories);
+      setMacros({
+        protein: { 
+          remaining: data.protein, 
+          total: data.protein,
+          status: 'left' 
+        },
+        carbs: { 
+          remaining: data.carbs, 
+          total: data.carbs,
+          status: 'left' 
+        },
+        fats: { 
+          remaining: data.fat, 
+          total: data.fat,
+          status: 'left' 
+        }
+      });
+    }
+  }, []);
   const [showCamera, setShowCamera] = useState(false);
   const webcamRef = useRef(null);
 
-  const capture = () => {
+  const capture = async () => {
     const imageSrc = webcamRef.current.getScreenshot();
-    // In a real app, this would send to your API for calorie analysis
-    console.log('Captured image:', imageSrc);
     setShowCamera(false);
-    // Add temporary meal while waiting for API response
-    setRecentMeals(prev => [{
-      name: 'Analyzing...',
-      calories: 0,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      macros: { protein: 0, carbs: 0, fats: 0 },
-      image: imageSrc
-    }, ...prev.slice(0, 4)]);
+    
+    try {
+      // Add temporary meal while waiting for API response
+      setRecentMeals(prev => [{
+        name: 'Analyzing...',
+        calories: 0,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        macros: { protein: 0, carbs: 0, fats: 0 },
+        image: imageSrc
+      }, ...prev.slice(0, 4)]);
+
+      // Convert base64 image to blob
+      const blob = await fetch(imageSrc).then(res => res.blob());
+      
+      const formData = new FormData();
+      formData.append('image', blob, 'capture.jpg');
+
+      const response = await fetch('http://localhost:5678/webhook-test/7d422945-75f0-4f01-99a3-26a91e490009', {
+        method: 'POST',
+        body: formData
+      });
+
+      const result = await response.json();
+      localStorage.setItem('currentScanResult', JSON.stringify(result));
+      router.push('/scan/result');
+    } catch (error) {
+      console.error('Error analyzing image:', error);
+      setRecentMeals(prev => prev.filter(meal => meal.name !== 'Analyzing...'));
+    }
   };
 
-  const [recentMeals, setRecentMeals] = useState([
-    { 
-      name: 'Fattoush Salad', 
-      calories: 153, 
-      time: '12:57 PM',
-      macros: { protein: 12, carbs: 10, fats: 5 },
-      image: '/salad.jpg'
-    },
-    { 
-      name: 'Protein Shake', 
-      calories: 180, 
-      time: '10:45 AM',
-      macros: { protein: 24, carbs: 8, fats: 2 },
-      image: '/shake.jpg'
+  const navigateToDate = (daysOffset) => {
+    const newDate = new Date(currentDate);
+    newDate.setDate(newDate.getDate() + daysOffset);
+    setCurrentDate(newDate);
+  };
+
+  const [recentMeals, setRecentMeals] = useState([]);
+
+  useEffect(() => {
+    // Load meal history for current date
+    const mealHistory = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+    const todayMeals = mealHistory.filter(meal => {
+      const mealDate = new Date(meal.date);
+      return mealDate.toDateString() === currentDate.toDateString();
+    });
+    
+    setRecentMeals(todayMeals.map(meal => ({
+      name: meal.description || 'Scanned Food',
+      calories: meal.calories,
+      time: new Date(meal.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      macros: { 
+        protein: meal.protein,
+        carbs: meal.carbs,
+        fats: meal.fats
+      },
+      image: '/food-placeholder.jpg'
+    })));
+
+    // Update nutrition stats
+    if (nutritionData) {
+      const totalCalories = todayMeals.reduce((sum, meal) => sum + meal.calories, 0);
+      const totalProtein = todayMeals.reduce((sum, meal) => sum + meal.protein, 0);
+      const totalCarbs = todayMeals.reduce((sum, meal) => sum + meal.carbs, 0);
+      const totalFats = todayMeals.reduce((sum, meal) => sum + meal.fats, 0);
+
+      setCaloriesRemaining(Math.max(0, nutritionData.calories - totalCalories));
+      setMacros({
+        protein: {
+          remaining: Math.max(0, nutritionData.protein - totalProtein),
+          total: nutritionData.protein,
+          status: totalProtein > nutritionData.protein ? 'over' : 'left'
+        },
+        carbs: {
+          remaining: Math.max(0, nutritionData.carbs - totalCarbs),
+          total: nutritionData.carbs,
+          status: totalCarbs > nutritionData.carbs ? 'over' : 'left'
+        },
+        fats: {
+          remaining: Math.max(0, nutritionData.fat - totalFats),
+          total: nutritionData.fat,
+          status: totalFats > nutritionData.fat ? 'over' : 'left'
+        }
+      });
     }
-  ]);
+  }, [currentDate, nutritionData]);
 
   return (
     <div style={{
@@ -94,6 +169,18 @@ export default function Dashboard() {
         marginBottom: '24px',
         padding: '0 8px'
       }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <button 
+          onClick={() => navigateToDate(-1)}
+          style={{
+            background: 'none',
+            border: 'none',
+            fontSize: '20px',
+            cursor: 'pointer'
+          }}
+        >
+          ◀
+        </button>
         <div style={{ 
           fontWeight: '700', 
           fontSize: '20px',
@@ -103,6 +190,18 @@ export default function Dashboard() {
         }}>
           <span>🍎</span> Cal AI
         </div>
+        <button 
+          onClick={() => navigateToDate(1)}
+          style={{
+            background: 'none',
+            border: 'none',
+            fontSize: '20px',
+            cursor: 'pointer'
+          }}
+        >
+          ▶
+        </button>
+      </div>
         
         <div style={{ display: 'flex', gap: '16px' }}>
           <button style={{
@@ -165,7 +264,7 @@ export default function Dashboard() {
                 color: '#888',
                 marginTop: '0.25rem'
               }}>
-                of {2000} recommended
+                of {nutritionData?.calories || 2000} recommended
               </div>
             </div>
           </div>
@@ -181,14 +280,14 @@ export default function Dashboard() {
           }}>
             <div style={{
               position: 'absolute',
-              fontSize: '1.5rem'
+              fontSize: '1rem'
             }}>🔥</div>
             <div style={{
               position: 'absolute',
               fontSize: '0.9rem',
               fontWeight: '700'
             }}>
-              {Math.round(((userData.recommendedCalories - caloriesRemaining) / userData.recommendedCalories) * 100)}%
+              {nutritionData ? Math.round(((nutritionData.calories - caloriesRemaining) / nutritionData.calories) * 100) : 0}%
             </div>
           </div>
         </div>

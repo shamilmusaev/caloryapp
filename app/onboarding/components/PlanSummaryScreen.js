@@ -84,6 +84,25 @@ export default function PlanSummaryScreen({
 
   const nutritionData = getNutritionData();
 
+  const handleComplete = () => {
+    // Save the calculated nutrition data to localStorage
+    const age = calculateAge(birthdate);
+    const bmr = calculateBMR(weight, height, age, gender);
+    const activityFactor = getActivityFactor(workoutFreq);
+    const tdee = bmr * activityFactor;
+    const targetCalories = calculateTargetCalories(tdee, goal, weight);
+    const macros = calculateMacros(targetCalories, weight);
+    
+    localStorage.setItem('nutritionData', JSON.stringify({
+      calories: targetCalories,
+      protein: macros.protein,
+      carbs: macros.carbs,
+      fat: macros.fat
+    }));
+    
+    onComplete();
+  };
+
   return (
     <div style={{
       padding: '24px',
@@ -211,7 +230,7 @@ export default function PlanSummaryScreen({
       </div>
 
       <button
-        onClick={onComplete}
+        onClick={handleComplete}
         style={{
           backgroundColor: 'black',
           color: 'white',
