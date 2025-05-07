@@ -1,18 +1,57 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import Webcam from 'react-webcam';
 import { useRouter } from 'next/navigation';
 
 export default function Dashboard() {
   const router = useRouter();
   const [currentDate] = useState(new Date());
   const [activeTab, setActiveTab] = useState('today');
+  // Sample user data - in a real app this would come from user profile/API
+  const [userData] = useState({
+    recommendedCalories: 2000,
+    recommendedProtein: 140,
+    recommendedCarbs: 210,
+    recommendedFats: 65
+  });
+
   const [caloriesRemaining, setCaloriesRemaining] = useState(1250);
   const [macros, setMacros] = useState({
-    protein: { remaining: 45, total: 140, status: 'over' },
-    carbs: { remaining: 89, total: 210, status: 'left' },
-    fats: { remaining: 48, total: 65, status: 'left' }
+    protein: { 
+      remaining: 45, 
+      total: userData.recommendedProtein,
+      status: 'over' 
+    },
+    carbs: { 
+      remaining: 89, 
+      total: userData.recommendedCarbs,
+      status: 'left' 
+    },
+    fats: { 
+      remaining: 48, 
+      total: userData.recommendedFats,
+      status: 'left' 
+    }
   });
+  const [showCamera, setShowCamera] = useState(false);
+  const webcamRef = useRef(null);
+
+  const capture = () => {
+    const imageSrc = webcamRef.current.getScreenshot();
+    // In a real app, this would send to your API for calorie analysis
+    console.log('Captured image:', imageSrc);
+    setShowCamera(false);
+    // Add temporary meal while waiting for API response
+    setRecentMeals(prev => [{
+      name: 'Analyzing...',
+      calories: 0,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      macros: { protein: 0, carbs: 0, fats: 0 },
+      image: imageSrc
+    }, ...prev.slice(0, 4)]);
+  };
+
   const [recentMeals, setRecentMeals] = useState([
     { 
       name: 'Fattoush Salad', 
@@ -70,7 +109,10 @@ export default function Dashboard() {
             fontWeight: '600',
             color: activeTab === 'today' ? 'black' : '#888',
             borderBottom: activeTab === 'today' ? '2px solid #FFCC00' : 'none',
-            padding: '4px 0'
+            padding: '4px 0',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer'
           }}>
             Today
           </button>
@@ -78,7 +120,10 @@ export default function Dashboard() {
             fontWeight: '600',
             color: activeTab === 'yesterday' ? 'black' : '#888',
             borderBottom: activeTab === 'yesterday' ? '2px solid #FFCC00' : 'none',
-            padding: '4px 0'
+            padding: '4px 0',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer'
           }}>
             Yesterday
           </button>
@@ -101,18 +146,27 @@ export default function Dashboard() {
           alignItems: 'center'
         }}>
           <div>
-            <div style={{
-              fontSize: '2.5rem',
-              fontWeight: '800',
-              lineHeight: '1'
-            }}>{caloriesRemaining}</div>
-            <div style={{
-              fontSize: '1rem',
-              color: 'black',
-              fontWeight: '500',
-              marginTop: '0.5rem'
-            }}>
-              Calories left
+            <div>
+              <div style={{
+                fontSize: '2.5rem',
+                fontWeight: '800',
+                lineHeight: '1'
+              }}>{caloriesRemaining}</div>
+              <div style={{
+                fontSize: '1rem',
+                color: 'black',
+                fontWeight: '500',
+                marginTop: '0.5rem'
+              }}>
+                Calories left
+              </div>
+              <div style={{
+                fontSize: '0.875rem',
+                color: '#888',
+                marginTop: '0.25rem'
+              }}>
+                of {2000} recommended
+              </div>
             </div>
           </div>
           <div style={{
@@ -134,7 +188,7 @@ export default function Dashboard() {
               fontSize: '0.9rem',
               fontWeight: '700'
             }}>
-              {Math.round((caloriesRemaining / 2000) * 100)}%
+              {Math.round(((userData.recommendedCalories - caloriesRemaining) / userData.recommendedCalories) * 100)}%
             </div>
           </div>
         </div>
@@ -321,23 +375,83 @@ export default function Dashboard() {
       </div>
 
       {/* Floating Action Button */}
-      <div style={{
-        position: 'fixed',
-        bottom: '5rem',
-        right: '1.5rem',
-        width: '3.5rem',
-        height: '3.5rem',
-        borderRadius: '50%',
-        backgroundColor: '#FFCC00',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        cursor: 'pointer'
-      }}>
+      <div 
+        style={{
+          position: 'fixed',
+          bottom: '5rem',
+          right: '1.5rem',
+          width: '3.5rem',
+          height: '3.5rem',
+          borderRadius: '50%',
+          backgroundColor: '#FFCC00',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+          cursor: 'pointer'
+        }}
+        onClick={() => setShowCamera(true)}
+      >
         <span style={{ fontSize: '1.5rem' }}>📷</span>
       </div>
       </div>
+
+      {/* Camera Modal */}
+      {showCamera && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.9)',
+          zIndex: 1000,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <Webcam
+            audio={false}
+            ref={webcamRef}
+            screenshotFormat="image/jpeg"
+            style={{
+              width: '100%',
+              maxWidth: '500px',
+              borderRadius: '1rem',
+              marginBottom: '1rem'
+            }}
+          />
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <button
+              onClick={() => setShowCamera(false)}
+              style={{
+                padding: '0.75rem 1.5rem',
+                borderRadius: '1rem',
+                backgroundColor: '#FF3B30',
+                color: 'white',
+                border: 'none',
+                fontWeight: '600'
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={capture}
+              style={{
+                padding: '0.75rem 1.5rem',
+                borderRadius: '1rem',
+                backgroundColor: '#FFCC00',
+                color: 'black',
+                border: 'none',
+                fontWeight: '600'
+              }}
+            >
+              Capture
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
