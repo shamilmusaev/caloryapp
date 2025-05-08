@@ -6,15 +6,17 @@ import { useRouter } from 'next/navigation';
 
 export default function Dashboard() {
   const router = useRouter();
-  const [currentDate] = useState(new Date());
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [activeTab, setActiveTab] = useState('today');
-  // Sample user data - in a real app this would come from user profile/API
-  const [userData] = useState({
-    recommendedCalories: 2000,
-    recommendedProtein: 140,
-    recommendedCarbs: 210,
-    recommendedFats: 65
-  });
+
+  useEffect(() => {
+    // Update active tab based on date
+    const today = new Date();
+    setActiveTab(currentDate.toDateString() === today.toDateString() ? 'today' : 
+                 currentDate.toDateString() === new Date(today.setDate(today.getDate() - 1)).toDateString() ? 'yesterday' : '');
+  }, [currentDate]);
+  // Get user data from onboarding
+  const [userData, setUserData] = useState(null);
 
   // Get calculated nutrition data from onboarding
   const [nutritionData, setNutritionData] = useState(null);
@@ -26,10 +28,11 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    // In a real app, this would come from your state management or API
+    // Get user data from onboarding
     const storedData = localStorage.getItem('nutritionData');
     if (storedData) {
       const data = JSON.parse(storedData);
+      setUserData(data);
       setNutritionData(data);
       setCaloriesRemaining(data.calories);
       setMacros({
@@ -79,12 +82,86 @@ export default function Dashboard() {
         body: formData
       });
 
-      const result = await response.json();
-      localStorage.setItem('currentScanResult', JSON.stringify(result));
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Parse the response JSON
+      const data = await response.json();
+      console.log('API Response:', data);
+      
+      // Create a safe result object with default values for all expected fields
+      // This ensures we always have valid data even if the API response is incomplete
+      const safeResult = {
+        description: 'Unknown Food',
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fats: 0,
+        health_suggestion: ''
+      };
+      
+      // Safely extract data from the response if available
+      if (data && Array.isArray(data) && data.length > 0 && data[0].output) {
+        // Handle nested output structure
+        const output = data[0].output;
+        
+        // Safely extract each field with type checking
+        if (output.description && typeof output.description === 'string') {
+          safeResult.description = output.description;
+        }
+        
+        // Convert numeric fields with proper type checking
+        safeResult.calories = typeof output.calories === 'number' ? output.calories : 
+                             (parseInt(output.calories) || 0);
+        safeResult.protein = typeof output.protein === 'number' ? output.protein : 
+                            (parseInt(output.protein) || 0);
+        safeResult.carbs = typeof output.carbs === 'number' ? output.carbs : 
+                          (parseInt(output.carbs) || 0);
+        safeResult.fats = typeof output.fats === 'number' ? output.fats : 
+                         (parseInt(output.fats) || 0);
+        
+        if (output.health_suggestion && typeof output.health_suggestion === 'string') {
+          safeResult.health_suggestion = output.health_suggestion;
+        }
+      }
+
+      // Store the scan result
+      localStorage.setItem('currentScanResult', JSON.stringify(safeResult));
+      console.log('Processed Result:', safeResult);
+
+      // Add to meal history
+      const mealHistory = JSON.parse(localStorage.getItem('mealHistory') || '[]');
+      const newMeal = {
+        description: safeResult.description,
+        calories: safeResult.calories,
+        protein: safeResult.protein,
+        carbs: safeResult.carbs,
+        fats: safeResult.fats,
+        date: new Date().toISOString(),
+        image: imageSrc
+      };
+      mealHistory.unshift(newMeal);
+      localStorage.setItem('mealHistory', JSON.stringify(mealHistory));
+
+      // Update recent meals
+      setRecentMeals(prev => [{
+        name: safeResult.description,
+        calories: safeResult.calories,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        macros: {
+          protein: safeResult.protein,
+          carbs: safeResult.carbs,
+          fats: safeResult.fats
+        },
+        image: imageSrc
+      }, ...prev.filter(meal => meal.name !== 'Analyzing...').slice(0, 4)]);
+
       router.push('/scan/result');
     } catch (error) {
       console.error('Error analyzing image:', error);
       setRecentMeals(prev => prev.filter(meal => meal.name !== 'Analyzing...'));
+      alert('Failed to analyze image. Please try again.');
     }
   };
 
@@ -113,7 +190,7 @@ export default function Dashboard() {
         carbs: meal.carbs,
         fats: meal.fats
       },
-      image: '/food-placeholder.jpg'
+      image: meal.image || '/food-placeholder.jpg'
     })));
 
     // Update nutrition stats
@@ -167,20 +244,9 @@ export default function Dashboard() {
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: '24px',
-        padding: '0 8px'
+        padding: '0 8px',
+        width: '100%'
       }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-        <button 
-          onClick={() => navigateToDate(-1)}
-          style={{
-            background: 'none',
-            border: 'none',
-            fontSize: '20px',
-            cursor: 'pointer'
-          }}
-        >
-          ◀
-        </button>
         <div style={{ 
           fontWeight: '700', 
           fontSize: '20px',
@@ -188,53 +254,54 @@ export default function Dashboard() {
           alignItems: 'center',
           gap: '8px'
         }}>
-          <span>🍎</span> Cal AI
+          <span style={{ color: '#000000' }}>🍎</span> Cal AI
         </div>
-        <button 
-          onClick={() => navigateToDate(1)}
-          style={{
-            background: 'none',
-            border: 'none',
-            fontSize: '20px',
-            cursor: 'pointer'
-          }}
-        >
-          ▶
-        </button>
-      </div>
         
         <div style={{ display: 'flex', gap: '16px' }}>
-          <button style={{
-            fontWeight: '600',
-            color: activeTab === 'today' ? 'black' : '#888',
-            borderBottom: activeTab === 'today' ? '2px solid #FFCC00' : 'none',
-            padding: '4px 0',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer'
-          }}>
+          <button 
+            onClick={() => {
+              const today = new Date();
+              setCurrentDate(today);
+            }}
+            style={{
+              fontWeight: '600',
+              color: activeTab === 'today' ? 'black' : '#888',
+              borderBottom: activeTab === 'today' ? '2px solid #FFCC00' : 'none',
+              padding: '4px 0',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+          >
             Today
           </button>
-          <button style={{
-            fontWeight: '600',
-            color: activeTab === 'yesterday' ? 'black' : '#888',
-            borderBottom: activeTab === 'yesterday' ? '2px solid #FFCC00' : 'none',
-            padding: '4px 0',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer'
-          }}>
+          <button 
+            onClick={() => {
+              const yesterday = new Date();
+              yesterday.setDate(yesterday.getDate() - 1);
+              setCurrentDate(yesterday);
+            }}
+            style={{
+              fontWeight: '600',
+              color: activeTab === 'yesterday' ? 'black' : '#888',
+              borderBottom: activeTab === 'yesterday' ? '2px solid #FFCC00' : 'none',
+              padding: '4px 0',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+          >
             Yesterday
           </button>
         </div>
 
-        <div style={{ fontSize: '20px' }}>🔔</div>
+        <div style={{ fontSize: '20px', color: '#000000' }}>🔔</div>
       </div>
 
       {/* Calorie Summary */}
       <div style={{
         backgroundColor: 'white',
-        borderRadius: '1rem',
+        borderRadius: '1.5rem',
         padding: '1.5rem',
         boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
         marginBottom: '1.5rem'
@@ -245,49 +312,69 @@ export default function Dashboard() {
           alignItems: 'center'
         }}>
           <div>
-            <div>
-              <div style={{
-                fontSize: '2.5rem',
-                fontWeight: '800',
-                lineHeight: '1'
-              }}>{caloriesRemaining}</div>
-              <div style={{
-                fontSize: '1rem',
-                color: 'black',
-                fontWeight: '500',
-                marginTop: '0.5rem'
-              }}>
-                Calories left
-              </div>
-              <div style={{
-                fontSize: '0.875rem',
-                color: '#888',
-                marginTop: '0.25rem'
-              }}>
-                of {nutritionData?.calories || 2000} recommended
-              </div>
+            <div style={{
+              fontSize: '2rem',
+              fontWeight: '800',
+              lineHeight: '1'
+            }}>{caloriesRemaining || 0}</div>
+            <div style={{
+              fontSize: '0.9rem',
+              color: '#666',
+              fontWeight: '500',
+              marginTop: '0.25rem'
+            }}>
+              Calories left
             </div>
           </div>
           <div style={{
             width: '5rem',
             height: '5rem',
             borderRadius: '50%',
-            border: '0.5rem solid #FFCC00',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
             position: 'relative'
           }}>
+            {/* Серый фон круга */}
             <div style={{
               position: 'absolute',
-              fontSize: '1rem'
-            }}>🔥</div>
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              borderRadius: '50%',
+              border: '0.5rem solid #eee'
+            }}></div>
+            
+            {/* Прогресс круга (черная часть) */}
             <div style={{
               position: 'absolute',
-              fontSize: '0.9rem',
-              fontWeight: '700'
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              borderRadius: '50%',
+              border: '0.5rem solid transparent',
+              borderTopColor: '#000',
+              borderRightColor: '#000',
+              transform: `rotate(${nutritionData ? Math.round(((nutritionData.calories - caloriesRemaining) / nutritionData.calories) * 360 / 4) : 0}deg)`,
+              clipPath: 'polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%, 50% 50%)'
+            }}></div>
+            
+            {/* Внутренний белый круг с иконкой */}
+            <div style={{
+              position: 'absolute',
+              top: '0.5rem',
+              left: '0.5rem',
+              width: '4rem',
+              height: '4rem',
+              borderRadius: '50%',
+              backgroundColor: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}>
-              {nutritionData ? Math.round(((nutritionData.calories - caloriesRemaining) / nutritionData.calories) * 100) : 0}%
+              <div style={{
+                fontSize: '1.5rem',
+                color: '#000000'
+              }}>🔥</div>
             </div>
           </div>
         </div>
@@ -303,60 +390,95 @@ export default function Dashboard() {
         {[
           { 
             macro: 'protein',
-            icon: '🍗',
-            color: '#FF3B30',
+            icon: '🥩',
+            color: '#000000',
             label: 'Protein over'
           },
           { 
             macro: 'carbs',
             icon: '🌾',
-            color: '#FF9500',
+            color: '#000000',
             label: 'Carbs left'
           },
           { 
             macro: 'fats',
             icon: '💧',
-            color: '#007AFF',
+            color: '#000000',
             label: 'Fats left'
           }
         ].map(({macro, icon, color, label}) => {
           const data = macros[macro];
+          const percentage = data.total > 0 ? Math.round((data.remaining / data.total) * 100) : 0;
+          
           return (
             <div key={macro} style={{
               backgroundColor: 'white',
               borderRadius: '1rem',
-              padding: '1rem',
+              padding: '0.75rem',
               boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
               textAlign: 'center'
             }}>
               <div style={{
-                fontSize: '1.5rem',
-                marginBottom: '0.5rem'
-              }}>{icon}</div>
-              <div style={{
-                fontSize: '1.25rem',
+                fontSize: '1rem',
                 fontWeight: '700',
                 marginBottom: '0.25rem'
-              }}>{data.remaining}g</div>
+              }}>{data.remaining || 0}g</div>
               <div style={{
                 fontSize: '0.75rem',
                 color: '#555',
-                marginBottom: '0.75rem'
-              }}>{label}</div>
+                marginBottom: '0.5rem'
+              }}>{macro === 'protein' ? 'Protein over' : macro === 'carbs' ? 'Carbs left' : 'Fats left'}</div>
               <div style={{
-                width: '3rem',
-                height: '3rem',
+                width: '2.5rem',
+                height: '2.5rem',
                 borderRadius: '50%',
-                border: `0.25rem solid ${color}`,
                 margin: '0 auto',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '0.75rem',
-                fontWeight: '700',
-                color: color
+                position: 'relative'
               }}>
-                {Math.round((data.remaining / data.total) * 100)}%
+                {/* Серый фон круга */}
+                <div style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  borderRadius: '50%',
+                  border: '0.2rem solid #eee'
+                }}></div>
+                
+                {/* Прогресс круга (цветная часть) */}
+                <div style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  borderRadius: '50%',
+                  border: '0.2rem solid transparent',
+                  borderTopColor: color,
+                  borderRightColor: color,
+                  transform: `rotate(${percentage * 3.6 / 4}deg)`,
+                  clipPath: 'polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%, 50% 50%)'
+                }}></div>
+                
+                {/* Внутренний белый круг с иконкой */}
+                <div style={{
+                  position: 'absolute',
+                  top: '0.2rem',
+                  left: '0.2rem',
+                  width: '2.1rem',
+                  height: '2.1rem',
+                  borderRadius: '50%',
+                  backgroundColor: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <div style={{
+                    fontSize: '1rem',
+                    color: color
+                  }}>{icon}</div>
+                </div>
               </div>
             </div>
           );
@@ -366,49 +488,54 @@ export default function Dashboard() {
       {/* Recently Uploaded */}
       <div style={{ marginBottom: '5rem' }}>
         <h2 style={{
-          fontSize: '1.125rem',
+          fontSize: '1rem',
           fontWeight: '600',
           marginBottom: '1rem'
-        }}>Recently Uploaded</h2>
+        }}>Recently uploaded</h2>
 
         <div style={{
           display: 'flex',
-          gap: '1rem',
-          overflowX: 'auto',
-          paddingBottom: '0.5rem'
+          flexDirection: 'column',
+          gap: '0.75rem'
         }}>
           {recentMeals.map((meal, index) => (
             <div key={index} style={{
               backgroundColor: 'white',
               borderRadius: '1rem',
-              padding: '1rem',
+              padding: '0.75rem',
               boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-              minWidth: '12rem',
               display: 'flex',
-              gap: '1rem'
+              gap: '0.75rem',
+              alignItems: 'center'
             }}>
               <div style={{
-                width: '3rem',
-                height: '3rem',
+                width: '3.5rem',
+                height: '3.5rem',
                 borderRadius: '0.75rem',
                 backgroundImage: `url(${meal.image})`,
                 backgroundSize: 'cover',
-                backgroundPosition: 'center'
+                backgroundPosition: 'center',
+                flexShrink: 0
               }}></div>
-              <div>
+              <div style={{ flex: 1 }}>
                 <div style={{
-                  fontSize: '1rem',
-                  fontWeight: '600',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
                   marginBottom: '0.25rem'
-                }}>{meal.name}</div>
+                }}>
+                  <div style={{
+                    fontSize: '0.9rem',
+                    fontWeight: '600'
+                  }}>{meal.name}</div>
+                  <div style={{
+                    fontSize: '0.75rem',
+                    color: '#888'
+                  }}>{meal.time}</div>
+                </div>
                 <div style={{
-                  fontSize: '0.75rem',
-                  color: '#888',
-                  marginBottom: '0.5rem'
-                }}>{meal.time}</div>
-                <div style={{
-                  fontSize: '0.875rem',
-                  fontWeight: '700',
+                  fontSize: '0.85rem',
+                  fontWeight: '600',
                   marginBottom: '0.5rem'
                 }}>{meal.calories} calories</div>
                 <div style={{
@@ -416,9 +543,15 @@ export default function Dashboard() {
                   gap: '0.75rem',
                   fontSize: '0.75rem'
                 }}>
-                  <span style={{ color: '#FF3B30' }}>🥩 {meal.macros.protein}g</span>
-                  <span style={{ color: '#FF9500' }}>🌾 {meal.macros.carbs}g</span>
-                  <span style={{ color: '#007AFF' }}>💧 {meal.macros.fats}g</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <span style={{ color: '#000000' }}>🥩</span> {meal.macros.protein}g
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <span style={{ color: '#000000' }}>🌾</span> {meal.macros.carbs}g
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <span style={{ color: '#000000' }}>💧</span> {meal.macros.fats}g
+                  </span>
                 </div>
               </div>
             </div>
@@ -430,13 +563,15 @@ export default function Dashboard() {
       <div style={{
         position: 'fixed',
         bottom: '0',
-        left: '0',
-        right: '0',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        width: '390px',
         backgroundColor: 'white',
         display: 'flex',
         justifyContent: 'space-around',
         padding: '0.75rem 0',
-        boxShadow: '0 -2px 8px rgba(0,0,0,0.05)'
+        boxShadow: '0 -2px 8px rgba(0,0,0,0.05)',
+        borderTop: '1px solid #f0f0f0'
       }}>
         <button style={{
           display: 'flex',
@@ -447,7 +582,8 @@ export default function Dashboard() {
           background: 'none',
           border: 'none'
         }}>
-          <span style={{ fontSize: '1.25rem' }}>🏠</span>
+          <span style={{ fontSize: '1.25rem', color: '#000000' }}>🏠</span>
+          <span style={{ fontSize: '0.7rem', fontWeight: '500' }}>Home</span>
         </button>
         <button style={{
           display: 'flex',
@@ -458,7 +594,8 @@ export default function Dashboard() {
           background: 'none',
           border: 'none'
         }}>
-          <span style={{ fontSize: '1.25rem' }}>📊</span>
+          <span style={{ fontSize: '1.25rem', color: '#000000' }}>📊</span>
+          <span style={{ fontSize: '0.7rem', fontWeight: '500' }}>Analytics</span>
         </button>
         <button style={{
           display: 'flex',
@@ -469,7 +606,8 @@ export default function Dashboard() {
           background: 'none',
           border: 'none'
         }}>
-          <span style={{ fontSize: '1.25rem' }}>⚙️</span>
+          <span style={{ fontSize: '1.25rem', color: '#000000' }}>⚙️</span>
+          <span style={{ fontSize: '0.7rem', fontWeight: '500' }}>Settings</span>
         </button>
       </div>
 
@@ -478,20 +616,22 @@ export default function Dashboard() {
         style={{
           position: 'fixed',
           bottom: '5rem',
-          right: '1.5rem',
+          left: '50%',
+          transform: 'translateX(-50%)',
           width: '3.5rem',
           height: '3.5rem',
           borderRadius: '50%',
-          backgroundColor: '#FFCC00',
+          backgroundColor: 'black',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-          cursor: 'pointer'
+          cursor: 'pointer',
+          zIndex: 10
         }}
         onClick={() => setShowCamera(true)}
       >
-        <span style={{ fontSize: '1.5rem' }}>📷</span>
+        <span style={{ fontSize: '1.5rem', color: 'white' }}>+</span>
       </div>
       </div>
 
