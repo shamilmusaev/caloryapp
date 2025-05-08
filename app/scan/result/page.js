@@ -13,6 +13,8 @@ export default function ScanResult() {
     fats: 0
   });
 
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     try {
       const scanResult = localStorage.getItem('currentScanResult');
@@ -26,8 +28,25 @@ export default function ScanResult() {
     } catch (error) {
       console.error('Error parsing scan result:', error);
       router.push('/dashboard');
+    } finally {
+      setLoading(false);
     }
   }, [router]);
+
+  if (loading) {
+    return (
+      <div style={{ 
+        padding: '24px',
+        textAlign: 'center',
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <p>Loading scan results...</p>
+      </div>
+    );
+  }
 
   const saveAndContinue = () => {
     // Save to meal history
